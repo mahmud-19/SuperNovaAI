@@ -9,7 +9,7 @@ sys.path.append(str(Path(__file__).parent.resolve()))
 # ---- Programmatic DB Reset ----
 try:
     from app.database import SessionLocal
-    from app.models import User, Case, InferenceResult, Annotation, AuditLog
+    from app.models import User, Case, InferenceResult, Annotation, AuditLog, RetrainingLog, RetrainingState
     from app.seed import seed_demo_users
     
     db = SessionLocal()
@@ -17,6 +17,8 @@ try:
     db.query(Annotation).delete()
     db.query(InferenceResult).delete()
     db.query(Case).delete()
+    db.query(RetrainingLog).delete()
+    db.query(RetrainingState).delete()
     db.query(User).delete()
     db.commit()
     seed_demo_users(db)
