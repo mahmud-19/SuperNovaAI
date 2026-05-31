@@ -227,11 +227,43 @@ export function Reannotate() {
 
   const clampScale = (value: number) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, value));
 
-  function pointer(): number[] | null {
+  /**
+   * Convert a native pointer event to Konva content-space coordinates (0–512).
+   *
+   * ROOT CAUSE OF THE GAP
+   * The CSS in styles.css forces canvas-frame to max-width:420px and applies
+   * `width:100%/height:100%` to the Stage, konvajs-content, and the canvas
+   * element.  Konva 9.x's _getContentPosition() computes its CSS-scale ratio
+   * as `getBoundingClientRect().width / element.clientWidth`.  Because both
+   * values equal ≈420 (CSS forced both to 100%), the ratio is 1.0 — Konva
+   * thinks there is no CSS scaling and returns raw CSS-pixel coords (0–420)
+   * from getPointerPosition() as though they were canvas pixels (0–512).
+   *
+   * FIX
+   * Read clientX/Y directly from the native event and the container's
+   * getBoundingClientRect().  Scale to canvas pixels using the true ratio
+   * stage.width() / containerRect.width (= 512/420 ≈ 1.22).  Only then apply
+   * the Konva stage transform (zoom + pan):
+   *
+   *   canvasX  = (clientX - rect.left) * (stage.width  / rect.width)
+   *   contentX = (canvasX - stage.x()) / stage.scaleX()
+   *
+   * This keeps the cursor preview circle and every brush/eraser stroke exactly
+   * under the OS cursor at any zoom level and after any pan.
+   */
+  function pointer(nativeEvt: { clientX: number; clientY: number }): number[] | null {
     const stage = stageRef.current;
-    const pos = stage?.getRelativePointerPosition();
-    if (!pos) return null;
-    return [Math.max(0, Math.min(512, pos.x)), Math.max(0, Math.min(512, pos.y))];
+    if (!stage) return null;
+    const rect = stage.container().getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return null;
+    // Ratio: how many canvas pixels per 1 CSS pixel
+    const csx = stage.width()  / rect.width;   // e.g. 512/420 ≈ 1.22
+    const csy = stage.height() / rect.height;
+    const canvasX = (nativeEvt.clientX - rect.left) * csx;
+    const canvasY = (nativeEvt.clientY - rect.top)  * csy;
+    const ix = (canvasX - stage.x()) / stage.scaleX();
+    const iy = (canvasY - stage.y()) / stage.scaleY();
+    return [Math.max(0, Math.min(512, ix)), Math.max(0, Math.min(512, iy))];
   }
 
   function zoomAtPoint(next: number, screenPoint: { x: number; y: number }) {
@@ -248,8 +280,17 @@ export function Reannotate() {
   function handleWheel(event: Konva.KonvaEventObject<WheelEvent>) {
     event.evt.preventDefault();
     const stage = stageRef.current;
-    const screenPoint = stage?.getPointerPosition();
-    if (!stage || !screenPoint) return;
+    if (!stage) return;
+    const rect = stage.container().getBoundingClientRect();
+    if (rect.width === 0) return;
+    // Scale raw CSS coords to canvas pixels so the zoom anchor stays consistent
+    // with the corrected pointer() coordinate space (see pointer() above).
+    const csx = stage.width() / rect.width;
+    const csy = stage.height() / rect.height;
+    const screenPoint = {
+      x: (event.evt.clientX - rect.left) * csx,
+      y: (event.evt.clientY - rect.top)  * csy,
+    };
     const factor = 1.1;
     const next = event.evt.deltaY > 0 ? stage.scaleX() / factor : stage.scaleX() * factor;
     zoomAtPoint(next, screenPoint);
@@ -260,9 +301,11 @@ export function Reannotate() {
     setStagePos({ x: 0, y: 0 });
   }
 
-  function mouseDown() {
+  function mouseDown(e: Konva.KonvaEventObject<PointerEvent>) {
     if (panMode || readOnly) return;
-    const point = pointer();
+    // Auto-enable Binary Mask toggle the moment brush/eraser is used
+    if (!showMask && tool !== 'polygon') setShowMask(true);
+    const point = pointer(e.evt);
     if (!point) return;
 
     if (tool === 'polygon') {
@@ -284,8 +327,8 @@ export function Reannotate() {
     setLines((items) => [...items, { tool, size: brushSize, points: point } as StrokeLine]);
   }
 
-  function mouseMove() {
-    const point = pointer();
+  function mouseMove(e: Konva.KonvaEventObject<PointerEvent>) {
+    const point = pointer(e.evt);
     if (point) setCursor({ x: point[0], y: point[1] });
     if (panMode || !drawing || tool === 'polygon') return;
     if (!point) return;
@@ -581,7 +624,9 @@ export function Reannotate() {
         <div>
           {error && <div className="inline-error" style={{ marginBottom: 10 }}>{error}</div>}
           {readOnly && <div className="warning" style={{ marginBottom: 10 }}>This case is finalized and is read-only.</div>}
-          <div className="canvas-frame">
+          {/* touch-action:none stops the browser from scrolling/zooming on touch,
+              which would otherwise shift the pointer-position origin mid-stroke. */}
+          <div className="canvas-frame" style={{ touchAction: 'none', userSelect: 'none' }}>
             <Stage
               width={512} height={512}
               className={panMode ? 'konva-stage pan-cursor' : 'konva-stage draw-cursor'}
@@ -590,9 +635,10 @@ export function Reannotate() {
               x={stagePos.x} y={stagePos.y}
               draggable={panMode}
               onWheel={handleWheel}
-              onMouseDown={mouseDown} onMouseMove={mouseMove} onMouseUp={mouseUp}
-              onMouseLeave={() => setCursor(null)}
-              onTouchStart={mouseDown} onTouchMove={mouseMove} onTouchEnd={mouseUp}
+              onPointerDown={mouseDown}
+              onPointerMove={mouseMove}
+              onPointerUp={mouseUp}
+              onPointerLeave={() => setCursor(null)}
               onDragEnd={e => setStagePos({ x: e.target.x(), y: e.target.y() })}
               style={{ filter: `brightness(${brightness}%) contrast(${contrast}%) invert(${invert ? 100 : 0}%)` }}
             >
@@ -695,7 +741,6 @@ export function Reannotate() {
           </div>
 
           <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-            <button className="btn btn-ghost btn-sm" onClick={() => { pushState([], []); setPolygon([]); setSelectedPolyIdx(-1); }}>Clear Edits</button>
             <button className="btn btn-primary" disabled={busy || readOnly} onClick={saveReannotation} id="btn-save-reannotation" style={{ flex: 1 }}>
               {busy ? 'Saving…' : 'Save Reannotation'}
             </button>
@@ -712,7 +757,7 @@ export function Reannotate() {
           <p className="text-sm">
             <strong>Brush</strong> adds lesion pixels. <strong>Eraser</strong> reveals scan underneath.
             <br />
-            <strong>Polygon</strong> closes on first point. Click a saved polygon to <strong>select & drag</strong> its vertices.
+            <strong>Polygon</strong> closes on first point. Click a saved polygon to <strong>select &amp; drag</strong> its vertices.
           </p>
           <p className="text-sm">Scroll to zoom · Pan mode to drag · Esc to deselect.</p>
 
