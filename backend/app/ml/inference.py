@@ -1,6 +1,7 @@
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 from PIL import Image, ImageDraw
@@ -298,31 +299,94 @@ def _next_version(case_dir: Path) -> int:
     return max(versions, default=0) + 1
 
 
-def _colormap_rgba(values: np.ndarray) -> np.ndarray:
+def _colormap_rgba(values: np.ndarray, mask: np.ndarray) -> np.ndarray:
     """
-    Colormap mapping normalized uncertainty values [0, 1] to RGBA.
-    Alpha is scaled by the uncertainty value itself (values * 255) to make
-    low-uncertainty background pixels fully transparent.
-    Colors progress from blue/green (low) -> yellow (mid) -> red (high).
+    Map normalised uncertainty values [0, 1] to RGBA.
+
+    Colour ramp:  green (low uncertainty) → yellow (moderate) → red (high).
+    Alpha channel: 255 inside the boundary band (mask == 1), 0 outside.
     """
-    blue = np.array([39, 96, 198], dtype=np.float32)
-    green = np.array([38, 161, 96], dtype=np.float32)
-    yellow = np.array([238, 194, 66], dtype=np.float32)
-    red = np.array([211, 67, 67], dtype=np.float32)
+    green  = np.array([38,  161,  96], dtype=np.float32)
+    yellow = np.array([238, 194,  66], dtype=np.float32)
+    red    = np.array([211,  67,  67], dtype=np.float32)
 
     rgba = np.zeros((*values.shape, 4), dtype=np.float32)
-    low = values < 0.34
-    mid = (values >= 0.34) & (values < 0.68)
-    high = values >= 0.68
+    lo = values < 0.5
+    hi = ~lo
 
-    rgba[low, :3] = blue + (green - blue) * (values[low, None] / 0.34)
-    rgba[mid, :3] = green + (yellow - green) * ((values[mid, None] - 0.34) / 0.34)
-    rgba[high, :3] = yellow + (red - yellow) * ((values[high, None] - 0.68) / 0.32)
+    rgba[lo, :3] = green  + (yellow - green)  * (values[lo, None] / 0.5)
+    rgba[hi, :3] = yellow + (red    - yellow) * ((values[hi, None] - 0.5) / 0.5)
 
-    # Set Alpha channel scaled linearly by the uncertainty level
-    rgba[..., 3] = values * 255.0
+    rgba[mask == 1, 3] = 255.0
+    rgba[mask == 0, 3] = 0.0
 
     return np.clip(rgba, 0, 255).astype(np.uint8)
+
+
+def _boundary_band(pred_binary: np.ndarray,
+                   outer_px: int = 3,
+                   inner_px: int = 15) -> np.ndarray:
+    """
+    Build a wide, gap-free band centred on the lesion boundary.
+
+    outer_px  – pixels to extend *outside* the lesion edge  (kept small so
+                the heatmap stays visually inside the boundary)
+    inner_px  – pixels to include *inside* the lesion edge  (deeper band
+                captures all pixels whose classification is uncertain)
+
+    A 3×3 structuring element with N iterations grows/shrinks by ~N pixels
+    on each side, so total band width ≈ outer_px + inner_px pixels.
+    """
+    k = np.ones((3, 3), np.uint8)
+    dilated = cv2.dilate(pred_binary, k, iterations=outer_px)
+    eroded  = cv2.erode(pred_binary,  k, iterations=inner_px)
+    band = np.clip(dilated.astype(np.int32) - eroded.astype(np.int32), 0, 1)
+    return band.astype(np.uint8)
+
+
+def _boundary_uncertainty(mean_map: np.ndarray,
+                          variance_map: Optional[np.ndarray] = None) -> np.ndarray:
+    """
+    Compute per-pixel boundary uncertainty in [0, 1].
+
+    Primary metric: binary entropy of the mean prediction.
+        H(p) = -p·log₂(p) - (1-p)·log₂(1-p)
+    This is 1.0 exactly at p=0.5 (maximum model disagreement, i.e. the
+    decision boundary) and 0 at p=0 or p=1 (confident predictions).  It
+    therefore correctly highlights every pixel that any model placed on or
+    near the boundary, WITHOUT the metric collapsing when all models give
+    similar but non-binary outputs.
+
+    Secondary metric (when inter-model variance is available): scaled
+    variance (max possible value is 0.25 for a Bernoulli variable), blended
+    at 40 % weight so empirical model disagreement still shows through.
+    """
+    eps = 1e-7
+    p = np.clip(mean_map, eps, 1.0 - eps)
+    entropy = -(p * np.log2(p) + (1.0 - p) * np.log2(1.0 - p))  # ∈ [0, 1]
+
+    if variance_map is not None:
+        var_scaled = np.clip(variance_map / 0.25, 0, 1)
+        return 0.6 * entropy + 0.4 * var_scaled
+    return entropy
+
+
+def _normalise_in_band(uncertainty: np.ndarray,
+                       band: np.ndarray,
+                       entropy_fallback: np.ndarray) -> np.ndarray:
+    """
+    Stretch the uncertainty values that fall inside the boundary band to
+    cover the full [0, 1] colour ramp.  When the band contains no spread
+    (all models fully agree everywhere), fall back to raw entropy so that
+    boundary pixels still receive a meaningful colour.
+    """
+    band_vals = uncertainty[band == 1]
+    if band_vals.size > 0 and (band_vals.max() - band_vals.min()) > 1e-6:
+        u_min, u_max = float(band_vals.min()), float(band_vals.max())
+        return np.clip((uncertainty - u_min) / (u_max - u_min), 0.0, 1.0)
+    # Fallback: use raw entropy (always > 0 near the boundary)
+    e_max = float(entropy_fallback.max())
+    return np.clip(entropy_fallback / max(e_max, 1e-7), 0.0, 1.0)
 
 
 # ========== RUN REAL INFERENCE OR FALLBACK MOCK ==========
@@ -359,11 +423,35 @@ def run_mock_inference(preprocessed_image_path: str) -> InferenceOutput:
     for angle in np.linspace(0, 2 * np.pi, 48, endpoint=False):
         points.append([round(cx + rx * np.cos(angle), 2), round(cy + ry * np.sin(angle), 2)])
 
+    # ---- Simulate 5 model predictions with slightly different boundary radii ----
     yy, xx = np.mgrid[0:512, 0:512]
-    norm = np.sqrt(((xx - cx) / rx) ** 2 + ((yy - cy) / ry) ** 2)
-    uncertainty = np.clip(np.abs(norm - 0.8), 0, 1)
-    uncertainty = 1 - uncertainty
-    heatmap = Image.fromarray(_colormap_rgba(uncertainty), mode="RGBA")
+    model_probs = []
+    for r_offset in [-12, -6, 0, 6, 12]:
+        dist = np.sqrt(((xx - cx) / (rx + r_offset)) ** 2 + ((yy - cy) / (ry + r_offset)) ** 2)
+        prob = 1.0 / (1.0 + np.exp(12.0 * (dist - 1.0)))
+        model_probs.append(prob)
+
+    stacked   = np.stack(model_probs, axis=0)       # (5, 512, 512)
+    mean_prob = stacked.mean(axis=0)                # mean prediction  ∈ [0,1]
+    variance  = stacked.var(axis=0)                 # inter-model variance
+
+    pred_binary = (np.asarray(mask) > 0).astype(np.uint8)
+
+    # ---- Wide, gap-free boundary band (3 px outside, 0 px inside) ----
+    band = _boundary_band(pred_binary, outer_px=3, inner_px=0)
+
+    # ---- Uncertainty = entropy (primary) + scaled variance (secondary) ----
+    uncertainty = _boundary_uncertainty(mean_prob, variance)
+
+    # ---- Entropy fallback for normalisation ----
+    eps = 1e-7
+    p_c = np.clip(mean_prob, eps, 1.0 - eps)
+    entropy_raw = -(p_c * np.log2(p_c) + (1.0 - p_c) * np.log2(1.0 - p_c))
+
+    unc_norm = _normalise_in_band(uncertainty, band, entropy_raw)
+
+    heatmap_colors = _colormap_rgba(unc_norm, band)
+    heatmap = Image.fromarray(heatmap_colors, mode="RGBA")
     heatmap.save(heatmap_path, format="PNG")
 
     total_pixels = int((np.asarray(mask) > 0).sum())
@@ -473,15 +561,26 @@ def run_inference(preprocessed_image_path: str) -> InferenceOutput:
             if len(points) >= 3:
                 contour_json.append(points)
 
-        # 9. Normalize variance map for colormap mapping
-        v_min = variance_512.min()
-        v_max = variance_512.max()
-        if v_max - v_min > 1e-8:
-            unc_norm = (variance_512 - v_min) / (v_max - v_min)
-        else:
-            unc_norm = np.zeros_like(variance_512)
+        # 9. Build wide, gap-free boundary band strictly outside the lesion
+        pred_binary = (mean_512 > 0.5).astype(np.uint8)
+        band = _boundary_band(pred_binary, outer_px=3, inner_px=0)
 
-        heatmap_colors = _colormap_rgba(unc_norm)
+        # 10. Per-pixel uncertainty = entropy of mean prediction + scaled variance
+        #     Entropy peaks exactly at p=0.5 (the decision boundary) so it
+        #     captures every pixel where any model wavered, even when ensemble
+        #     variance is small because all models agree on a non-binary value.
+        var_map = variance_512 if len(model_preds) > 1 else None
+        uncertainty = _boundary_uncertainty(mean_512, var_map)
+
+        # Entropy for normalisation fallback
+        eps = 1e-7
+        p_c = np.clip(mean_512, eps, 1.0 - eps)
+        entropy_raw = -(p_c * np.log2(p_c) + (1.0 - p_c) * np.log2(1.0 - p_c))
+
+        # 11. Normalise inside the band so the full colour ramp is used
+        unc_norm = _normalise_in_band(uncertainty, band, entropy_raw)
+
+        heatmap_colors = _colormap_rgba(unc_norm, band)
         heatmap_img = Image.fromarray(heatmap_colors, mode="RGBA")
         heatmap_img.save(heatmap_path, format="PNG")
 

@@ -107,6 +107,7 @@ export function Reannotate() {
   const [showHeatmap, setShowHeatmap] = useState(true);
   const [showMask, setShowMask] = useState(true);
   const [maskOpacity, setMaskOpacity] = useState(0.42);
+  const [heatmapOpacity, setHeatmapOpacity] = useState(0.38);
   const [brushSize, setBrushSize] = useState(12);
   const [lines, setLines] = useState<StrokeLine[]>([]);
   const [polygon, setPolygon] = useState<number[][]>([]);         // in-progress polygon
@@ -529,6 +530,21 @@ export function Reannotate() {
             </button>
             <div className="brush-slider-row" style={{ marginTop: 6 }}>
               <div className="brush-slider-label">
+                <span>Heatmap Opacity</span>
+                <span>{Math.round(heatmapOpacity * 100)}%</span>
+              </div>
+              <input
+                type="range"
+                className="brush-slider"
+                min={0}
+                max={100}
+                value={Math.round(heatmapOpacity * 100)}
+                onChange={e => setHeatmapOpacity(Number(e.target.value) / 100)}
+                disabled={!showHeatmap}
+              />
+            </div>
+            <div className="brush-slider-row" style={{ marginTop: 6 }}>
+              <div className="brush-slider-label">
                 <span>Mask Opacity</span>
                 <span>{Math.round(maskOpacity * 100)}%</span>
               </div>
@@ -645,7 +661,7 @@ export function Reannotate() {
               {/* Background image + heatmap layer */}
               <Layer listening={false}>
                 {image && <KonvaImage image={image} width={512} height={512} />}
-                {showHeatmap && heatmap && <KonvaImage image={heatmap} width={512} height={512} opacity={0.38} />}
+                {showHeatmap && heatmap && <KonvaImage image={heatmap} width={512} height={512} opacity={heatmapOpacity} />}
               </Layer>
 
               {/* Polygon + brush strokes layer */}

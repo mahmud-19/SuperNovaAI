@@ -72,6 +72,7 @@ export function CaseCanvas({
   showHeatmap = false,
   showMask = true,
   heatmapOpacity = 0.42,
+  maskOpacity = 0.42,
   enableZoom = false,
 }: {
   imageUrl?: string;
@@ -81,6 +82,7 @@ export function CaseCanvas({
   showHeatmap?: boolean;
   showMask?: boolean;
   heatmapOpacity?: number;
+  maskOpacity?: number;
   enableZoom?: boolean;
 }) {
   const image = useHtmlImage(imageUrl);
@@ -148,7 +150,7 @@ export function CaseCanvas({
           <Layer>
             {image && <KonvaImage image={image} width={512} height={512} />}
             {showHeatmap && heatmap && <KonvaImage image={heatmap} width={512} height={512} opacity={heatmapOpacity} />}
-            {showMask && maskImage && <KonvaImage image={maskImage} width={512} height={512} opacity={0.42} />}
+            {showMask && maskImage && <KonvaImage image={maskImage} width={512} height={512} opacity={maskOpacity} />}
             {showMask && (contours || []).map((polygon, i) => (
               <Line key={i} points={polygon.flat()} closed stroke="#10B981" strokeWidth={2.5} fill="rgba(16,185,129,0.12)" lineJoin="round" />
             ))}

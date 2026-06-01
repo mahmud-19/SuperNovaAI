@@ -18,6 +18,12 @@ export function Review() {
   const [error, setError] = useState('');
   const imageUrl = useObjectUrl(id ? `/cases/${id}/image` : undefined);
   const heatmapUrl = useObjectUrl(id ? `/cases/${id}/heatmap` : undefined);
+  const maskUrl = useObjectUrl(id ? `/cases/${id}/mask` : undefined);
+
+  const [showHeatmap, setShowHeatmap] = useState(true);
+  const [showMask, setShowMask] = useState(true);
+  const [heatmapOpacity, setHeatmapOpacity] = useState(0.38);
+  const [maskOpacity, setMaskOpacity] = useState(0.42);
 
   useEffect(() => {
     api.get<CaseDetail>(`/cases/${id}`)
@@ -37,11 +43,74 @@ export function Review() {
             <CaseCanvas
               imageUrl={imageUrl}
               heatmapUrl={heatmapUrl}
+              maskUrl={maskUrl}
               contours={caseData.current_result?.contour_json}
-              showHeatmap
-              heatmapOpacity={0.38}
+              showHeatmap={showHeatmap}
+              showMask={showMask}
+              heatmapOpacity={heatmapOpacity}
+              maskOpacity={maskOpacity}
               enableZoom
             />
+
+            {/* Overlays Control Panel */}
+            <div style={{ marginTop: 12, background: 'var(--card-bg, #fff)', border: '1px solid var(--border)', borderRadius: 'var(--r-md)', padding: '14px 18px', boxShadow: 'var(--shadow-sm)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${showHeatmap ? 'btn-primary' : 'btn-ghost'}`}
+                  onClick={() => setShowHeatmap(p => !p)}
+                  style={{ background: showHeatmap ? 'var(--primary)' : undefined, color: showHeatmap ? '#fff' : undefined }}
+                >
+                  Heatmap: {showHeatmap ? 'ON' : 'OFF'}
+                </button>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${showMask ? 'btn-primary' : 'btn-ghost'}`}
+                  onClick={() => setShowMask(p => !p)}
+                  style={{ background: showMask ? 'var(--primary)' : undefined, color: showMask ? '#fff' : undefined }}
+                >
+                  Binary Mask: {showMask ? 'ON' : 'OFF'}
+                </button>
+                <span className="text-xs text-muted" style={{ marginLeft: 'auto' }}>Independent view toggles</span>
+              </div>
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div className="brush-slider-row" style={{ padding: '4px 0' }}>
+                  <div className="brush-slider-label" style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8125rem', marginBottom: 4 }}>
+                    <span style={{ fontWeight: 600, color: 'var(--text-muted)' }}>Heatmap Opacity</span>
+                    <span style={{ fontWeight: 700, color: 'var(--primary)' }}>{Math.round(heatmapOpacity * 100)}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    className="brush-slider"
+                    min={0}
+                    max={100}
+                    value={Math.round(heatmapOpacity * 100)}
+                    onChange={e => setHeatmapOpacity(Number(e.target.value) / 100)}
+                    disabled={!showHeatmap}
+                    style={{ width: '100%' }}
+                  />
+                </div>
+
+                <div className="brush-slider-row" style={{ padding: '4px 0', borderTop: '1px dashed var(--border)', paddingTop: 10 }}>
+                  <div className="brush-slider-label" style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8125rem', marginBottom: 4 }}>
+                    <span style={{ fontWeight: 600, color: 'var(--text-muted)' }}>Binary Mask Opacity</span>
+                    <span style={{ fontWeight: 700, color: 'var(--primary)' }}>{Math.round(maskOpacity * 100)}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    className="brush-slider"
+                    min={0}
+                    max={100}
+                    value={Math.round(maskOpacity * 100)}
+                    onChange={e => setMaskOpacity(Number(e.target.value) / 100)}
+                    disabled={!showMask}
+                    style={{ width: '100%' }}
+                  />
+                </div>
+              </div>
+            </div>
+
             <div style={{ marginTop: 8 }}><ConfidenceLegend /></div>
           </div>
 
