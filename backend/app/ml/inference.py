@@ -1,4 +1,5 @@
 import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -13,7 +14,11 @@ logger.setLevel(logging.INFO)
 # ========== PATHS ==========
 BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
 PROJECT_DIR = BACKEND_DIR.parent
-WEIGHTS_DIR = PROJECT_DIR / "models" / "weights"
+# When packaged as a desktop app the model weights live next to the executable,
+# not inside the frozen bundle. The launcher sets SUPERNOVA_WEIGHTS_DIR so the
+# same code finds the weights in both dev and packaged runs.
+_weights_override = os.environ.get("SUPERNOVA_WEIGHTS_DIR")
+WEIGHTS_DIR = Path(_weights_override) if _weights_override else PROJECT_DIR / "models" / "weights"
 
 ATTENTION_UNET_PATH = WEIGHTS_DIR / "attention_unet.pth"
 BASE_UNET_PATH = WEIGHTS_DIR / "base_unet.pth"
@@ -337,11 +342,28 @@ def _boundary_band(pred_binary: np.ndarray,
     A 3×3 structuring element with N iterations grows/shrinks by ~N pixels
     on each side, so total band width ≈ outer_px + inner_px pixels.
     """
-    k = np.ones((3, 3), np.uint8)
-    dilated = cv2.dilate(pred_binary, k, iterations=outer_px)
-    eroded  = cv2.erode(pred_binary,  k, iterations=inner_px)
-    band = np.clip(dilated.astype(np.int32) - eroded.astype(np.int32), 0, 1)
-    return band.astype(np.uint8)
+    if cv2 is not None:
+        k = np.ones((3, 3), np.uint8)
+        dilated = cv2.dilate(pred_binary, k, iterations=outer_px)
+        eroded  = cv2.erode(pred_binary,  k, iterations=inner_px)
+        band = np.clip(dilated.astype(np.int32) - eroded.astype(np.int32), 0, 1)
+        return band.astype(np.uint8)
+    else:
+        from PIL import ImageFilter
+        img = Image.fromarray(pred_binary * 255)
+        # Dilate outer_px times using Pillow MaxFilter
+        dilated_img = img
+        for _ in range(outer_px):
+            dilated_img = dilated_img.filter(ImageFilter.MaxFilter(3))
+        # Erode inner_px times using Pillow MinFilter
+        eroded_img = img
+        for _ in range(inner_px):
+            eroded_img = eroded_img.filter(ImageFilter.MinFilter(3))
+            
+        dilated = (np.array(dilated_img) > 0).astype(np.int32)
+        eroded = (np.array(eroded_img) > 0).astype(np.int32)
+        band = np.clip(dilated - eroded, 0, 1)
+        return band.astype(np.uint8)
 
 
 def _boundary_uncertainty(mean_map: np.ndarray,

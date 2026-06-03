@@ -14,7 +14,6 @@ export function Upload() {
   const [patientName, setPatientName] = useState('');
   const [age, setAge] = useState('');
   const [gender, setGender] = useState('');
-  const [examDate, setExamDate] = useState('');
   const [note, setNote] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -38,7 +37,6 @@ export function Upload() {
     if (field === 'patientName') return value.trim() ? '' : 'Patient name is required.';
     if (field === 'age') return value.trim() ? '' : 'Age is required.';
     if (field === 'gender') return value ? '' : 'Gender is required.';
-    if (field === 'examDate') return value ? '' : 'Exam date is required.';
     return '';
   }
 
@@ -47,7 +45,6 @@ export function Upload() {
     !!patientName.trim() &&
     !!age.trim() &&
     !!gender &&
-    !!examDate &&
     !Object.values(errors).some(err => !!err);
 
   function validate() {
@@ -57,7 +54,6 @@ export function Upload() {
     if (!patientName.trim()) e.patientName = 'Patient name is required.';
     if (!age.trim()) e.age = 'Age is required.';
     if (!gender) e.gender = 'Gender is required.';
-    if (!examDate) e.examDate = 'Exam date is required.';
     setErrors(e);
     return Object.keys(e).length === 0;
   }
@@ -72,7 +68,6 @@ export function Upload() {
       form.append('patient_name', patientName);
       if (age) form.append('age', age);
       if (gender) form.append('gender', gender);
-      form.append('exam_date', examDate);
       if (note) form.append('sonologist_note', note);
 
       const uploadResp = await api.post<CaseDetail>('/cases/upload', form);
@@ -192,21 +187,6 @@ export function Upload() {
                   </div>
                 </div>
 
-                <div>
-                  <label htmlFor="upload-exam-date">Exam Date</label>
-                  <input
-                    id="upload-exam-date"
-                    type="date"
-                    value={examDate}
-                    onChange={e => {
-                      const val = e.target.value;
-                      setExamDate(val);
-                      setErrors(p => ({ ...p, examDate: getValidationError('examDate', val) }));
-                    }}
-                    className={errors.examDate ? 'field-error' : ''}
-                  />
-                  {errors.examDate && <span className="field-error-msg">{errors.examDate}</span>}
-                </div>
               </div>
             </div>
 

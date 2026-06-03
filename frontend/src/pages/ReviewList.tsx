@@ -8,7 +8,7 @@ import { SkeletonTable } from '../components/Skeleton';
 import { useToast } from '../components/ToastContext';
 import { formatKSTDate } from '../utils/time';
 
-type SortKey = 'patient_name' | 'exam_date' | 'status';
+type SortKey = 'patient_name' | 'created_at' | 'status';
 type SortDir = 'asc' | 'desc';
 const PAGE_SIZE = 10;
 
@@ -26,7 +26,7 @@ export function ReviewList() {
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [sortKey, setSortKey] = useState<SortKey>('exam_date');
+  const [sortKey, setSortKey] = useState<SortKey>('created_at');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [page, setPage] = useState(1);
   const navigate = useNavigate();
@@ -49,7 +49,7 @@ export function ReviewList() {
   async function downloadReport(caseId: number, patientName?: string | null) {
     setDownloadingIds(prev => ({ ...prev, [caseId]: true }));
     try {
-      const response = await api.get(`/cases/${caseId}/report`, { responseType: 'blob' });
+      const response = await api.get(`/cases/${caseId}/report?report_type=reviewer`, { responseType: 'blob' });
       const url = URL.createObjectURL(response.data);
       const anchor = document.createElement('a');
       anchor.href = url;
@@ -75,7 +75,7 @@ export function ReviewList() {
       .sort((a, b) => {
         let av: any, bv: any;
         if (sortKey === 'patient_name') { av = a.patient_name ?? ''; bv = b.patient_name ?? ''; }
-        else if (sortKey === 'exam_date') { av = a.exam_date ?? a.created_at; bv = b.exam_date ?? b.created_at; }
+        else if (sortKey === 'created_at') { av = a.created_at; bv = b.created_at; }
         else { av = a.status; bv = b.status; }
         const cmp = av < bv ? -1 : av > bv ? 1 : 0;
         if (cmp !== 0) return sortDir === 'asc' ? cmp : -cmp;
@@ -144,8 +144,8 @@ export function ReviewList() {
                   <th className={thClass('patient_name')} onClick={() => toggleSort('patient_name')} tabIndex={0} onKeyDown={e => e.key==='Enter'&&toggleSort('patient_name')}>
                     Patient Name<SortIcon col="patient_name" sortKey={sortKey} dir={sortDir} />
                   </th>
-                  <th className={thClass('exam_date')} onClick={() => toggleSort('exam_date')} tabIndex={0} onKeyDown={e => e.key==='Enter'&&toggleSort('exam_date')}>
-                    Date<SortIcon col="exam_date" sortKey={sortKey} dir={sortDir} />
+                  <th className={thClass('created_at')} onClick={() => toggleSort('created_at')} tabIndex={0} onKeyDown={e => e.key==='Enter'&&toggleSort('created_at')}>
+                    Date<SortIcon col="created_at" sortKey={sortKey} dir={sortDir} />
                   </th>
                   <th className={thClass('status')} onClick={() => toggleSort('status')} tabIndex={0} onKeyDown={e => e.key==='Enter'&&toggleSort('status')}>
                     Status<SortIcon col="status" sortKey={sortKey} dir={sortDir} />
@@ -159,7 +159,7 @@ export function ReviewList() {
                     <td><span style={{ fontFamily: 'monospace', fontSize: '0.8125rem' }}>{c.patient_id || '—'}</span></td>
                     <td><span style={{ fontWeight: 600 }}>{c.patient_name || '—'}</span></td>
                     <td style={{ color: 'var(--text-muted)', fontSize: '0.8125rem' }}>
-                      {formatKSTDate(c.exam_date || c.created_at)}
+                      {formatKSTDate(c.created_at)}
                       <span style={{ fontSize: '0.7rem', display: 'block', color: 'var(--text-faint)' }}>KST</span>
                     </td>
                     <td><span className={`status-badge ${statusClass(c.status)}`}>{statusLabel(c.status)}</span></td>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { api } from '../api/client';
+import { api, API_BASE_URL } from '../api/client';
 import { CaseDetail } from '../api/types';
 import { CaseCanvas } from '../components/CaseCanvas';
 import { ConfidenceLegend } from '../components/Legend';
@@ -23,6 +23,10 @@ export function Outcome() {
   const imageUrl = useObjectUrl(id ? `/cases/${id}/image` : undefined);
   const heatmapUrl = useObjectUrl(id ? `/cases/${id}/heatmap` : undefined);
   const maskUrl = useObjectUrl(id ? `/cases/${id}/mask` : undefined);
+
+  const [ts] = useState(Date.now());
+  const token = sessionStorage.getItem('supernova_token') || '';
+  const reannotatedImgSrc = id ? `${API_BASE_URL}/cases/${id}/reannotated.png?ts=${ts}&token=${encodeURIComponent(token)}` : '';
 
   useEffect(() => {
     api.get<CaseDetail>(`/cases/${id}`)
@@ -136,18 +140,46 @@ export function Outcome() {
                 </div>
               </div>
 
-              {/* Right Side: Reannotated Image (Latest Expert / Current Review) */}
+              {/* Middle Side: Reannotated Image (Latest Expert / Current Review) */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <h4 style={{ fontSize: '0.875rem', fontWeight: 700, color: 'var(--text-muted)', borderBottom: '1px solid var(--border)', paddingBottom: 6 }}>
                   🩺 Expert Reannotated Image
                 </h4>
+                <div className="canvas-frame" style={{ 
+                  aspectRatio: '1 / 1', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center', 
+                  background: '#000000', 
+                  borderRadius: 'var(--r-md)', 
+                  border: '1px solid var(--border)',
+                  overflow: 'hidden',
+                  maxWidth: '420px',
+                  width: '100%',
+                  margin: '0 auto'
+                }}>
+                  {reannotatedImgSrc ? (
+                    <img
+                      src={reannotatedImgSrc}
+                      alt="Expert Reannotated Image"
+                      style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                    />
+                  ) : (
+                    <span style={{ color: 'var(--text-faint)', fontSize: '0.8125rem' }}>Loading reannotation…</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Right Side: Uncertainty Heatmap */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <h4 style={{ fontSize: '0.875rem', fontWeight: 700, color: 'var(--text-muted)', borderBottom: '1px solid var(--border)', paddingBottom: 6 }}>
+                  🔥 Uncertainty Heatmap
+                </h4>
                 <CaseCanvas
                   imageUrl={imageUrl}
                   heatmapUrl={heatmapUrl}
-                  maskUrl={maskUrl}
-                  contours={caseData.current_result?.contour_json}
                   showHeatmap={showHeatmap}
-                  showMask={showMask}
+                  showMask={false}
                   heatmapOpacity={heatmapOpacity}
                   enableZoom
                 />
@@ -164,15 +196,7 @@ export function Outcome() {
                 >
                   Heatmap: {showHeatmap ? 'ON' : 'OFF'}
                 </button>
-                <button
-                  type="button"
-                  className={`btn btn-sm ${showMask ? 'btn-primary' : 'btn-ghost'}`}
-                  onClick={() => setShowMask(p => !p)}
-                  style={{ background: showMask ? 'var(--primary)' : undefined, color: showMask ? '#fff' : undefined }}
-                >
-                  Binary Mask: {showMask ? 'ON' : 'OFF'}
-                </button>
-                <span className="text-xs text-muted">Independent view toggles</span>
+                <span className="text-xs text-muted">Heatmap view controls</span>
               </div>
               
               {showHeatmap && (

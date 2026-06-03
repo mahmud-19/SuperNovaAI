@@ -134,7 +134,7 @@ export function Review() {
                   <tr>
                     <td>Date</td>
                     <td>
-                      {formatKSTDate(caseData.exam_date || caseData.created_at)}
+                      {formatKSTDate(caseData.created_at)}
                       <span style={{ fontSize: '0.7rem', color: 'var(--text-faint)', marginLeft: 4 }}>KST</span>
                     </td>
                   </tr>

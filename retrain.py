@@ -7,6 +7,16 @@ API stays live during retraining (runs as a background task).
 """
 
 import os
+import sys
+
+# Ensure project root and backend directories are in sys.path so imports resolve
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+_BACKEND = os.path.join(_HERE, "backend")
+if _BACKEND not in sys.path:
+    sys.path.insert(0, _BACKEND)
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -16,8 +26,6 @@ import numpy as np
 from datetime import datetime
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-
-from models.unet import MODELS
 
 WEIGHTS_DIR        = os.getenv("WEIGHTS_DIR", "models/weights")
 CORRECTIONS_DIR    = os.getenv("CORRECTIONS_DIR", "corrections")
@@ -155,6 +163,10 @@ def run_retraining(log_id: str, db_url: str):
     db           = SessionLocal()
 
     try:
+        try:
+            from models.unet import MODELS
+        except ImportError:
+            from Models.unet import MODELS
         from database.models import RetrainingLog
         log = db.query(RetrainingLog).filter(RetrainingLog.id == log_id).first()
 

@@ -13,6 +13,20 @@ DEMO_USERS = [
         "password": "123456789",
         "role": UserRole.admin,
     },
+    {
+        "full_name": "Sonologist User",
+        "email": "sonologist@supernova.com",
+        "username": "sonologist",
+        "password": "12345678",
+        "role": UserRole.sonologist,
+    },
+    {
+        "full_name": "Expert Reviewer User",
+        "email": "reviewer@supernova.com",
+        "username": "reviewer",
+        "password": "87654321",
+        "role": UserRole.expert_reviewer,
+    },
 ]
 
 

@@ -7,7 +7,7 @@ import { AppLayout } from '../components/Layout';
 import { SkeletonTable } from '../components/Skeleton';
 import { formatKSTDate } from '../utils/time';
 
-type SortKey = 'patient_name' | 'exam_date' | 'status' | 'confidence';
+type SortKey = 'patient_name' | 'created_at' | 'status' | 'confidence';
 type SortDir = 'asc' | 'desc';
 const PAGE_SIZE = 10;
 
@@ -25,7 +25,7 @@ export function Dashboard() {
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [sortKey, setSortKey] = useState<SortKey>('exam_date');
+  const [sortKey, setSortKey] = useState<SortKey>('created_at');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [page, setPage] = useState(1);
   const navigate = useNavigate();
@@ -54,7 +54,7 @@ export function Dashboard() {
       .sort((a, b) => {
         let av: any, bv: any;
         if (sortKey === 'patient_name') { av = a.patient_name ?? ''; bv = b.patient_name ?? ''; }
-        else if (sortKey === 'exam_date') { av = a.exam_date ?? a.created_at; bv = b.exam_date ?? b.created_at; }
+        else if (sortKey === 'created_at') { av = a.created_at; bv = b.created_at; }
         else if (sortKey === 'status') { av = a.status; bv = b.status; }
         else { av = a.current_result?.confidence_score ?? 0; bv = b.current_result?.confidence_score ?? 0; }
         const cmp = av < bv ? -1 : av > bv ? 1 : 0;
@@ -148,8 +148,8 @@ export function Dashboard() {
                   <th className={thClass('status')} onClick={() => toggleSort('status')} tabIndex={0} onKeyDown={e => e.key==='Enter'&&toggleSort('status')}>
                     Status<SortIcon col="status" sortKey={sortKey} dir={sortDir} />
                   </th>
-                  <th className={thClass('exam_date')} onClick={() => toggleSort('exam_date')} tabIndex={0} onKeyDown={e => e.key==='Enter'&&toggleSort('exam_date')}>
-                    Date<SortIcon col="exam_date" sortKey={sortKey} dir={sortDir} />
+                  <th className={thClass('created_at')} onClick={() => toggleSort('created_at')} tabIndex={0} onKeyDown={e => e.key==='Enter'&&toggleSort('created_at')}>
+                    Date<SortIcon col="created_at" sortKey={sortKey} dir={sortDir} />
                   </th>
                 </tr>
               </thead>
@@ -174,7 +174,7 @@ export function Dashboard() {
                     </td>
                     <td><span className={`status-badge ${statusClass(c.status)}`}>{statusLabel(c.status)}</span></td>
                     <td style={{ color: 'var(--text-muted)', fontSize: '0.8125rem' }}>
-                      {formatKSTDate(c.exam_date || c.created_at)}
+                      {formatKSTDate(c.created_at)}
                       <span style={{ fontSize: '0.7rem', display: 'block', color: 'var(--text-faint)' }}>KST</span>
                     </td>
                   </tr>

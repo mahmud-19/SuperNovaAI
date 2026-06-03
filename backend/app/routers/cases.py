@@ -38,8 +38,21 @@ def _display_code(db: Session) -> str:
 
 
 def _current_result(db: Session, case_id: int) -> Optional[InferenceResult]:
+    # Try expert result first (highest version)
+    expert_res = db.scalar(
+        select(InferenceResult)
+        .where(InferenceResult.case_id == case_id, InferenceResult.source == ResultSource.expert)
+        .order_by(InferenceResult.version.desc())
+        .limit(1)
+    )
+    if expert_res:
+        return expert_res
+    # Fallback to AI result (highest version)
     return db.scalar(
-        select(InferenceResult).where(InferenceResult.case_id == case_id).order_by(InferenceResult.version.desc()).limit(1)
+        select(InferenceResult)
+        .where(InferenceResult.case_id == case_id, InferenceResult.source == ResultSource.ai)
+        .order_by(InferenceResult.version.desc())
+        .limit(1)
     )
 
 
@@ -280,41 +293,119 @@ def annotate_case(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid mask PNG data")
 
     case_dir = get_settings().storage_dir / case.patient_id
-    mask_path = case_dir / f"mask_v{version}.png"
-    mask.save(mask_path, format="PNG")
-    current = _current_result(db, case.id)
-    heatmap_path = case_dir / f"heatmap_v{version}.png"
-    if current and Path(current.uncertainty_map_path).exists():
-        shutil.copyfile(current.uncertainty_map_path, heatmap_path)
-    else:
-        # Fully transparent RGBA fallback so no full-image colour wash appears.
-        Image.new("RGBA", (512, 512), (0, 0, 0, 0)).save(heatmap_path, format="PNG")
+    case_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Save directly to expert mask storage path storage/<patient_id>/mask_<patient_id>.png
+    expert_mask_path = case_dir / f"mask_{case.patient_id}.png"
+    mask.save(expert_mask_path, format="PNG")
 
-    pixels = int((Image.open(mask_path).convert("L").point(lambda p: 255 if p else 0)).histogram()[255])
-    total_lesions = max(1, len(payload.contour_json)) if pixels else 0
-    confidence = 0.84 if pixels else 0.0
-    db.add(
-        Annotation(
+    # Recompute uncertainty heatmap
+    try:
+        import cv2
+        import numpy as np
+        from app.ml.inference import _boundary_band, _boundary_uncertainty, _normalise_in_band, _colormap_rgba
+
+        mask_arr = np.array(mask, dtype=np.uint8)
+        pred_binary = (mask_arr > 127).astype(np.uint8)
+        
+        # v19 boundary band (outer_px=3, inner_px=0)
+        band = _boundary_band(pred_binary, outer_px=3, inner_px=0)
+        
+        # Smooth probability map via Gaussian Blur
+        blur = cv2.GaussianBlur(mask_arr.astype(np.float32) / 255.0, (21, 21), 5)
+        mean_512 = np.clip(blur, 0.0, 1.0)
+        
+        var_map = 0.25 - np.square(mean_512 - 0.5)
+        uncertainty = _boundary_uncertainty(mean_512, var_map)
+        
+        eps = 1e-7
+        p_c = np.clip(mean_512, eps, 1.0 - eps)
+        entropy_raw = -(p_c * np.log2(p_c) + (1.0 - p_c) * np.log2(1.0 - p_c))
+        unc_norm = _normalise_in_band(uncertainty, band, entropy_raw)
+        
+        heatmap_colors = _colormap_rgba(unc_norm, band)
+        has_heatmap = True
+    except Exception as e:
+        import logging
+        logging.getLogger("supernova.cases").error(f"Failed to recompute expert uncertainty: {e}")
+        has_heatmap = False
+
+    # Check if an expert inference result already exists
+    current_expert = db.scalar(
+        select(InferenceResult)
+        .where(InferenceResult.case_id == case.id, InferenceResult.source == ResultSource.expert)
+        .order_by(InferenceResult.version.desc())
+        .limit(1)
+    )
+
+    if current_expert:
+        # Overwrite existing files
+        mask_path = Path(current_expert.mask_path)
+        mask.save(mask_path, format="PNG")
+        
+        heatmap_path = Path(current_expert.uncertainty_map_path)
+        if has_heatmap:
+            Image.fromarray(heatmap_colors, mode="RGBA").save(heatmap_path, format="PNG")
+        
+        pixels = int((Image.open(mask_path).convert("L").point(lambda p: 255 if p else 0)).histogram()[255])
+        total_lesions = max(1, len(payload.contour_json)) if pixels else 0
+        confidence = 0.84 if pixels else 0.0
+
+        current_expert.contour_json = payload.contour_json
+        current_expert.total_pixels = pixels
+        current_expert.total_lesions = total_lesions
+        current_expert.confidence_score = confidence
+
+        # Also update the latest Annotation row
+        ann = db.scalar(
+            select(Annotation)
+            .where(Annotation.case_id == case.id)
+            .order_by(Annotation.created_at.desc())
+            .limit(1)
+        )
+        if ann:
+            ann.contour_json = payload.contour_json
+            ann.mask_path = str(mask_path)
+        
+        result = current_expert
+    else:
+        # Create a new InferenceResult and Annotation
+        version = _next_db_version(db, case.id)
+        mask_path = case_dir / f"mask_v{version}.png"
+        mask.save(mask_path, format="PNG")
+        
+        heatmap_path = case_dir / f"heatmap_v{version}.png"
+        if has_heatmap:
+            Image.fromarray(heatmap_colors, mode="RGBA").save(heatmap_path, format="PNG")
+        else:
+            Image.new("RGBA", (512, 512), (0, 0, 0, 0)).save(heatmap_path, format="PNG")
+            
+        pixels = int((Image.open(mask_path).convert("L").point(lambda p: 255 if p else 0)).histogram()[255])
+        total_lesions = max(1, len(payload.contour_json)) if pixels else 0
+        confidence = 0.84 if pixels else 0.0
+
+        db.add(
+            Annotation(
+                case_id=case.id,
+                editor_id=current_user.id,
+                mask_path=str(mask_path),
+                contour_json=payload.contour_json,
+                confidence_map_path=str(heatmap_path),
+                is_finalized=False,
+            )
+        )
+        result = InferenceResult(
             case_id=case.id,
-            editor_id=current_user.id,
+            version=version,
+            source=ResultSource.expert,
             mask_path=str(mask_path),
             contour_json=payload.contour_json,
-            confidence_map_path=str(heatmap_path),
-            is_finalized=False,
+            uncertainty_map_path=str(heatmap_path),
+            confidence_score=confidence,
+            total_lesions=total_lesions,
+            total_pixels=pixels,
         )
-    )
-    result = InferenceResult(
-        case_id=case.id,
-        version=version,
-        source=ResultSource.expert,
-        mask_path=str(mask_path),
-        contour_json=payload.contour_json,
-        uncertainty_map_path=str(heatmap_path),
-        confidence_score=confidence,
-        total_lesions=total_lesions,
-        total_pixels=pixels,
-    )
-    db.add(result)
+        db.add(result)
     # Save reviewer note if provided
     if payload.reviewer_note is not None:
         case.reviewer_note = payload.reviewer_note
@@ -441,10 +532,28 @@ def _wrap_text(text: str, max_chars: int) -> list[str]:
     return lines
 
 
+def _draw_contours_on_image(image_path: str, contour_json: list) -> Image.Image:
+    img = Image.open(image_path).convert("RGBA")
+    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    for poly in contour_json:
+        if len(poly) < 2:
+            continue
+        points = [(float(pt[0]), float(pt[1])) for pt in poly]
+        points_closed = points + [points[0]]
+        if len(points) >= 3:
+            draw.polygon(points, fill=(16, 185, 129, 30))
+        draw.line(points_closed, fill=(16, 185, 129, 255), width=3)
+    
+    combined = Image.alpha_composite(img, overlay)
+    return combined.convert("RGB")
+
+
 @router.get("/{case_id}/report")
 def report_case(
     case_id: int,
     request: Request,
+    report_type: Optional[str] = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
@@ -464,7 +573,7 @@ def report_case(
     pdf.setFont("Helvetica-Bold", 16)
     pdf.drawString(margin, page_height - margin, "SuperNova AI — Ultrasound Lesion Boundary Detection Report")
     
-    if current_user.role == UserRole.expert_reviewer:
+    if current_user.role == UserRole.expert_reviewer or report_type == "reviewer":
         pdf.setFont("Helvetica-BoldOblique", 11)
         pdf.setFillColor(colors.HexColor("#2760c6"))
         pdf.drawString(margin, page_height - margin - 18, "Final Outcome by Expert Reviewer")
@@ -487,14 +596,20 @@ def report_case(
     pdf.setFont("Helvetica", 9)
     
     gender_str = case.gender.capitalize() if case.gender else "—"
-    exam_date_str = case.exam_date.strftime("%Y-%m-%d") if case.exam_date else case.created_at.strftime("%Y-%m-%d")
+    
+    from datetime import timedelta
+    utc_dt = case.created_at
+    if utc_dt.tzinfo is None:
+        utc_dt = utc_dt.replace(tzinfo=timezone.utc)
+    kst_dt = utc_dt.astimezone(timezone(timedelta(hours=9)))
+    upload_date_str = kst_dt.strftime("%Y-%m-%d")
     
     p_details = [
         ("Patient ID:", case.patient_id or "—"),
         ("Patient Name:", case.patient_name or "—"),
         ("Age:", f"{case.age} yrs" if case.age is not None else "—"),
         ("Gender:", gender_str),
-        ("Exam Date:", exam_date_str),
+        ("Date:", upload_date_str),
         ("Sonologist:", case.uploader_name or (case.owner.full_name if case.owner else "—")),
     ]
     for i, (label, val) in enumerate(p_details):
@@ -542,33 +657,78 @@ def report_case(
     y_images_title = y_divider1 - 18
     y_images = y_images_title - img_size - 12
     
-    # Raw Ultrasound image
-    x_raw = margin
-    pdf.setFont("Helvetica-Bold", 10)
-    pdf.drawString(x_raw, y_images_title, "1. Raw Ultrasound")
-    pdf.drawImage(case.preprocessed_image_path, x_raw, y_images, width=img_size, height=img_size, preserveAspectRatio=True)
-    
-    # Segmented Mask
-    x_mask = margin + img_size + gap
-    pdf.drawString(x_mask, y_images_title, "2. Segmented Mask")
-    pdf.drawImage(result.mask_path, x_mask, y_images, width=img_size, height=img_size, preserveAspectRatio=True)
-    
-    # Uncertainty Heatmap
-    x_heat = margin + 2 * (img_size + gap)
-    pdf.drawString(x_heat, y_images_title, "3. Uncertainty Heatmap")
-    pdf.drawImage(case.preprocessed_image_path, x_heat, y_images, width=img_size, height=img_size, preserveAspectRatio=True)
-    pdf.drawImage(result.uncertainty_map_path, x_heat, y_images, width=img_size, height=img_size, preserveAspectRatio=True, mask="auto")
-    
-    # 4. Confidence Level Legend
-    y_legend = y_images - 22
-    pdf.setFont("Helvetica", 8)
-    pdf.setFillColor(colors.HexColor("#5f6f7a"))
-    pdf.drawString(margin, y_legend, "Confidence Level Legend: Low (Blue/Green)  --  Moderate (Green/Yellow)  --  High (Red)")
-    pdf.setFillColor(colors.black)
-    
-    # Draw horizontal divider
-    y_divider2 = y_legend - 8
-    pdf.line(margin, y_divider2, page_width - margin, y_divider2)
+    if report_type == "reviewer":
+        # Raw Ultrasound image
+        x_raw = margin
+        pdf.setFont("Helvetica-Bold", 10)
+        pdf.drawString(x_raw, y_images_title, "1. Raw Ultrasound")
+        pdf.drawImage(case.preprocessed_image_path, x_raw, y_images, width=img_size, height=img_size, preserveAspectRatio=True)
+        
+        # Reannotated Image (middle panel)
+        x_reann = margin + img_size + gap
+        pdf.drawString(x_reann, y_images_title, "2. Reannotated Image")
+        try:
+            from reportlab.lib.utils import ImageReader
+            # Resolve mask path for reannotation
+            case_dir = get_settings().storage_dir / case.patient_id
+            expert_mask_path = case_dir / f"mask_{case.patient_id}.png"
+            mask_path = None
+            if expert_mask_path.exists():
+                mask_path = str(expert_mask_path)
+            else:
+                result_fallback = _current_result(db, case.id)
+                if result_fallback and Path(result_fallback.mask_path).exists():
+                    mask_path = result_fallback.mask_path
+            
+            if mask_path:
+                reann_img = _draw_contours_from_mask(case.preprocessed_image_path, mask_path)
+            else:
+                reann_img = Image.open(case.preprocessed_image_path)
+                
+            pdf.drawImage(ImageReader(reann_img), x_reann, y_images, width=img_size, height=img_size, preserveAspectRatio=True)
+        except Exception as e:
+            import logging
+            logging.getLogger("supernova.cases").error(f"Failed to draw reannotated image in PDF: {e}")
+            pdf.drawImage(case.preprocessed_image_path, x_reann, y_images, width=img_size, height=img_size, preserveAspectRatio=True)
+            
+        # Segmented Mask (right panel)
+        x_mask = margin + 2 * (img_size + gap)
+        pdf.drawString(x_mask, y_images_title, "3. Segmented Mask")
+        pdf.drawImage(result.mask_path, x_mask, y_images, width=img_size, height=img_size, preserveAspectRatio=True)
+        
+        # Draw horizontal divider (no legend)
+        y_divider2 = y_images - 12
+        pdf.line(margin, y_divider2, page_width - margin, y_divider2)
+        
+    else:
+        # Sonologist Report (default / "sonologist")
+        # Raw Ultrasound image
+        x_raw = margin
+        pdf.setFont("Helvetica-Bold", 10)
+        pdf.drawString(x_raw, y_images_title, "1. Raw Ultrasound")
+        pdf.drawImage(case.preprocessed_image_path, x_raw, y_images, width=img_size, height=img_size, preserveAspectRatio=True)
+        
+        # Segmented Mask (middle panel)
+        x_mask = margin + img_size + gap
+        pdf.drawString(x_mask, y_images_title, "2. Segmented Mask")
+        pdf.drawImage(result.mask_path, x_mask, y_images, width=img_size, height=img_size, preserveAspectRatio=True)
+        
+        # Uncertainty Heatmap (right panel)
+        x_heat = margin + 2 * (img_size + gap)
+        pdf.drawString(x_heat, y_images_title, "3. Uncertainty Heatmap")
+        pdf.drawImage(case.preprocessed_image_path, x_heat, y_images, width=img_size, height=img_size, preserveAspectRatio=True)
+        pdf.drawImage(result.uncertainty_map_path, x_heat, y_images, width=img_size, height=img_size, preserveAspectRatio=True, mask="auto")
+        
+        # Confidence Level Legend
+        y_legend = y_images - 22
+        pdf.setFont("Helvetica", 8)
+        pdf.setFillColor(colors.HexColor("#5f6f7a"))
+        pdf.drawString(margin, y_legend, "Confidence Level Legend: Low (Blue/Green)  --  Moderate (Green/Yellow)  --  High (Red)")
+        pdf.setFillColor(colors.black)
+        
+        # Draw horizontal divider
+        y_divider2 = y_legend - 8
+        pdf.line(margin, y_divider2, page_width - margin, y_divider2)
     
     # 5. Notes Section
     y_notes = y_divider2 - 16
@@ -616,11 +776,13 @@ def report_case(
 def export_case(
     case_id: int,
     request: Request,
+    report_type: Optional[str] = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
     # ZIP export replaced with upgraded PDF final report
-    return report_case(case_id, request, current_user, db)
+    r_type = report_type or "reviewer"
+    return report_case(case_id, request, report_type=r_type, current_user=current_user, db=db)
 
 
 def _serve_path(path_value: str) -> FileResponse:
@@ -634,6 +796,72 @@ def _serve_path(path_value: str) -> FileResponse:
 def get_image(case_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> FileResponse:
     case = _get_visible_case(db, current_user, case_id)
     return _serve_path(case.preprocessed_image_path)
+
+
+def _draw_contours_from_mask(image_path: str, mask_path: str) -> Image.Image:
+    img = Image.open(image_path).convert("RGBA")
+    mask_p = Path(mask_path)
+    if not mask_p.exists():
+        return img.convert("RGB")
+        
+    import cv2
+    import numpy as np
+    
+    mask_cv = cv2.imread(str(mask_p), cv2.IMREAD_GRAYSCALE)
+    if mask_cv is None:
+        return img.convert("RGB")
+        
+    _, thresh = cv2.threshold(mask_cv, 127, 255, cv2.THRESH_BINARY)
+    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    
+    for cnt in contours:
+        if len(cnt) < 2:
+            continue
+        points = [(float(pt[0][0]), float(pt[0][1])) for pt in cnt]
+        points_closed = points + [points[0]]
+        if len(points) >= 3:
+            draw.polygon(points, fill=(16, 185, 129, 30))
+        draw.line(points_closed, fill=(16, 185, 129, 255), width=3)
+        
+    combined = Image.alpha_composite(img, overlay)
+    return combined.convert("RGB")
+
+
+@router.get("/{case_id}/reannotated.png")
+def get_reannotated_image(
+    case_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    case = _get_visible_case(db, current_user, case_id)
+    
+    case_dir = get_settings().storage_dir / case.patient_id
+    expert_mask_path = case_dir / f"mask_{case.patient_id}.png"
+    
+    mask_path = None
+    if expert_mask_path.exists():
+        mask_path = str(expert_mask_path)
+    else:
+        result = _current_result(db, case.id)
+        if result and Path(result.mask_path).exists():
+            mask_path = result.mask_path
+            
+    if not mask_path:
+        return FileResponse(case.preprocessed_image_path)
+        
+    try:
+        reann_img = _draw_contours_from_mask(case.preprocessed_image_path, mask_path)
+        img_io = io.BytesIO()
+        reann_img.save(img_io, format="PNG")
+        img_io.seek(0)
+        return StreamingResponse(img_io, media_type="image/png")
+    except Exception as e:
+        import logging
+        logging.getLogger("supernova.cases").error(f"Failed to generate reannotated.png: {e}")
+        return FileResponse(case.preprocessed_image_path)
 
 
 @router.get("/{case_id}/mask")

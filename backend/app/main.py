@@ -230,3 +230,29 @@ def health() -> dict[str, str]:
 app.include_router(auth.router, prefix="/api")
 app.include_router(cases.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
+
+# ---------------------------------------------------------------------------
+# Serve the React frontend (production build)
+# When running as a bundled desktop app, SUPERNOVA_BASE_DIR is set by launcher.py
+# so that paths resolve correctly regardless of working directory.
+# ---------------------------------------------------------------------------
+import os as _os
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+
+_base_dir = Path(_os.environ.get(
+    "SUPERNOVA_BASE_DIR",
+    str(Path(__file__).resolve().parent.parent.parent)
+))
+_dist_dir = _base_dir / "frontend" / "dist"
+
+if _dist_dir.exists():
+    # Serve static assets (JS/CSS bundles)
+    _assets_dir = _dist_dir / "assets"
+    if _assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=str(_assets_dir)), name="static-assets")
+
+    # SPA catch-all: serve index.html for every non-API path so React Router works
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_spa(full_path: str):
+        return FileResponse(str(_dist_dir / "index.html"))

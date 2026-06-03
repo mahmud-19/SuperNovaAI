@@ -51,6 +51,10 @@ export function AdminDashboard() {
   const [userToDelete, setUserToDelete] = useState<NonAdminUser | null>(null);
   const [deleting, setDeleting] = useState(false);
 
+  // Retraining state
+  const [confirmRetrainOpen, setConfirmRetrainOpen] = useState(false);
+  const [triggering, setTriggering] = useState(false);
+
   const [retrainingStatus, setRetrainingStatus] = useState<{
     count: number;
     latest_log: {
@@ -69,6 +73,20 @@ export function AdminDashboard() {
     const interval = setInterval(fetchRetrainingStatus, 5000);
     return () => clearInterval(interval);
   }, []);
+
+  async function handleTriggerRetraining() {
+    setConfirmRetrainOpen(false);
+    setTriggering(true);
+    try {
+      await api.post('/admin/retrain/trigger');
+      toast('success', 'Manual retraining triggered successfully in the background.');
+      fetchRetrainingStatus();
+    } catch (err: any) {
+      toast('error', err.response?.data?.detail || 'Failed to trigger retraining.');
+    } finally {
+      setTriggering(false);
+    }
+  }
 
   function fetchRetrainingStatus() {
     api.get('/admin/retraining/status')
@@ -265,46 +283,59 @@ export function AdminDashboard() {
       </div>
 
       {/* Retraining Progress Widget */}
-      <div className="card" style={{ marginBottom: 20, padding: 20 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-          <span style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700, color: 'var(--text-muted)' }}>
-            Retraining Progress
-          </span>
-          {retrainingStatus.latest_log?.status === 'running' ? (
-            <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--pending)' }}>
-              Retraining in progress…
+      <div className="card" style={{ marginBottom: 20, padding: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 24, flexWrap: 'wrap' }}>
+        <div style={{ flex: '1 1 300px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+            <span style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700, color: 'var(--text-muted)' }}>
+              Retraining Progress
             </span>
-          ) : (
-            <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text-muted)' }}>
-              {100 - retrainingStatus.count} more needed
-            </span>
-          )}
+            {retrainingStatus.latest_log?.status === 'running' ? (
+              <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--pending)' }}>
+                Retraining in progress…
+              </span>
+            ) : (
+              <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text-muted)' }}>
+                {100 - retrainingStatus.count} more needed
+              </span>
+            )}
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+            <strong style={{ fontSize: '1.25rem', color: 'var(--text)' }}>
+              {retrainingStatus.count} / 100 corrections
+            </strong>
+            {retrainingStatus.latest_log?.status === 'completed' && retrainingStatus.latest_log.completed_at && (
+              <span style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
+                Last Success: {new Date(retrainingStatus.latest_log.completed_at).toLocaleString()} | Avg Dice: {retrainingStatus.latest_log.dice_after}
+              </span>
+            )}
+            {retrainingStatus.latest_log?.status === 'failed' && retrainingStatus.latest_log.completed_at && (
+              <span style={{ fontSize: '0.8125rem', color: 'var(--danger)' }}>
+                Last Run Failed at {new Date(retrainingStatus.latest_log.completed_at).toLocaleString()}
+              </span>
+            )}
+          </div>
+          <div style={{ width: '100%', height: 8, backgroundColor: 'rgba(0,0,0,0.06)', borderRadius: 4, overflow: 'hidden' }}>
+            <div
+              style={{
+                width: `${Math.min(100, (retrainingStatus.count / 100) * 100)}%`,
+                height: '100%',
+                backgroundColor: retrainingStatus.latest_log?.status === 'running' ? 'var(--in-review)' : 'var(--pending)',
+                borderRadius: 4,
+                transition: 'width 0.4s ease',
+              }}
+            />
+          </div>
         </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
-          <strong style={{ fontSize: '1.25rem', color: 'var(--text)' }}>
-            {retrainingStatus.count} / 100 corrections
-          </strong>
-          {retrainingStatus.latest_log?.status === 'completed' && retrainingStatus.latest_log.completed_at && (
-            <span style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
-              Last Success: {new Date(retrainingStatus.latest_log.completed_at).toLocaleString()} | Avg Dice: {retrainingStatus.latest_log.dice_after}
-            </span>
-          )}
-          {retrainingStatus.latest_log?.status === 'failed' && retrainingStatus.latest_log.completed_at && (
-            <span style={{ fontSize: '0.8125rem', color: 'var(--danger)' }}>
-              Last Run Failed at {new Date(retrainingStatus.latest_log.completed_at).toLocaleString()}
-            </span>
-          )}
-        </div>
-        <div style={{ width: '100%', height: 8, backgroundColor: 'rgba(0,0,0,0.06)', borderRadius: 4, overflow: 'hidden' }}>
-          <div
-            style={{
-              width: `${Math.min(100, (retrainingStatus.count / 100) * 100)}%`,
-              height: '100%',
-              backgroundColor: retrainingStatus.latest_log?.status === 'running' ? 'var(--in-review)' : 'var(--pending)',
-              borderRadius: 4,
-              transition: 'width 0.4s ease',
-            }}
-          />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            style={{ whiteSpace: 'nowrap' }}
+            disabled={retrainingStatus.latest_log?.status === 'running' || triggering}
+            onClick={() => setConfirmRetrainOpen(true)}
+          >
+            {retrainingStatus.latest_log?.status === 'running' ? '⚙️ Retraining Live' : '🚀 Trigger Retraining Now'}
+          </button>
         </div>
       </div>
 
@@ -597,6 +628,16 @@ export function AdminDashboard() {
         danger
         onConfirm={handleDeleteUser}
         onCancel={() => setDeleteModalOpen(false)}
+      />
+
+      {/* Retraining Confirmation Modal */}
+      <Modal
+        open={confirmRetrainOpen}
+        title="Trigger Manual Retraining?"
+        message="This will force-trigger a manual fine-tuning run of all 5 ensemble models using all currently available expert corrections. The application will stay live while retraining executes in the background. Are you sure you want to trigger retraining now?"
+        confirmLabel={triggering ? 'Triggering…' : 'Trigger Retraining'}
+        onConfirm={handleTriggerRetraining}
+        onCancel={() => setConfirmRetrainOpen(false)}
       />
     </AppLayout>
   );

@@ -26,3 +26,10 @@ env/
 .DS_Store
 Thumbs.db
 *.tsbuildinfo
+
+# Desktop packaging local files
+.venv-desktop/
+build/
+app.db
+storage/
+*.log

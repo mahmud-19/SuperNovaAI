@@ -26,7 +26,7 @@ export function Export() {
   async function download() {
     setDownloading(true);
     try {
-      const response = await api.get(`/cases/${id}/report`, { responseType: 'blob' });
+      const response = await api.get(`/cases/${id}/report?report_type=reviewer`, { responseType: 'blob' });
       const url = URL.createObjectURL(response.data);
       const anchor = document.createElement('a');
       anchor.href = url;

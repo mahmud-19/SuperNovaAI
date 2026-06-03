@@ -41,7 +41,7 @@ export function Segmentation() {
     if (!caseData) return;
     setReporting(true);
     try {
-      const r = await api.get(`/cases/${caseData.id}/report`, { responseType: 'blob' });
+      const r = await api.get(`/cases/${caseData.id}/report?report_type=sonologist`, { responseType: 'blob' });
       const url = URL.createObjectURL(r.data);
       const a = document.createElement('a');
       a.href = url;

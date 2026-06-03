@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -136,3 +136,39 @@ def get_retraining_status(
         "count": count,
         "latest_log": latest_data
     }
+
+@router.post("/retrain/trigger")
+def trigger_retraining(
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(require_role(UserRole.admin)),
+    db: Session = Depends(get_db),
+):
+    import uuid
+    import time
+    from app.models import RetrainingLog
+    from retrain import run_retraining
+    from app.config import get_settings
+
+    # Check if a retraining log is already running
+    running = db.scalar(
+        select(RetrainingLog).where(RetrainingLog.status == "running").limit(1)
+    )
+    if running:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A retraining run is already actively in progress",
+        )
+
+    # Create a new RetrainingLog row
+    log_id = f"retrain_{int(time.time())}_{uuid.uuid4().hex[:8]}"
+    new_log = RetrainingLog(
+        id=log_id,
+        status="running",
+    )
+    db.add(new_log)
+    db.commit()
+
+    # Starts run_retraining as a FastAPI BackgroundTask
+    background_tasks.add_task(run_retraining, log_id, get_settings().database_url)
+    
+    return {"message": "Retraining triggered successfully", "log_id": log_id}
