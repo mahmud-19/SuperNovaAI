@@ -10,6 +10,7 @@ import { Modal } from '../components/Modal';
 import { useToast } from '../components/ToastContext';
 import { useObjectUrl } from './hooks';
 import { Timeline } from '../components/Timeline';
+import { saveBlob } from '../utils/saveFile';
 
 function statusLabel(s: string) { return s === 'approved' ? 'Approved' : s === 'in_review' ? 'In Review' : 'Pending'; }
 function statusClass(s: string) { return s === 'approved' ? 'approved' : s === 'in_review' ? 'in-review' : 'pending'; }
@@ -42,13 +43,11 @@ export function Segmentation() {
     setReporting(true);
     try {
       const r = await api.get(`/cases/${caseData.id}/report?report_type=sonologist`, { responseType: 'blob' });
-      const url = URL.createObjectURL(r.data);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `SuperNova_Report_${caseData.patient_name ? caseData.patient_name.replace(/\s+/g, '_') : caseData.id}.pdf`;
-      a.click();
-      URL.revokeObjectURL(url);
-      toast('success', 'Report downloaded.');
+      const filename = `SuperNova_Sonologist_Report_${caseData.patient_name ? caseData.patient_name.replace(/\s+/g, '_') : caseData.id}.pdf`;
+      const success = await saveBlob(r.data, filename);
+      if (success) {
+        toast('success', 'Report downloaded.');
+      }
     } catch (err: any) {
       toast('error', err.response?.data?.detail || 'Report export failed.');
     } finally {

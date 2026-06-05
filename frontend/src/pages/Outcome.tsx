@@ -15,13 +15,11 @@ export function Outcome() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [approveModal, setApproveModal] = useState(false);
-  const [showHeatmap, setShowHeatmap] = useState(true);
   const [showMask, setShowMask] = useState(true);
-  const [heatmapOpacity, setHeatmapOpacity] = useState(0.42);
+  const [maskOpacity, setMaskOpacity] = useState(0.42);
   const navigate = useNavigate();
   const { toast } = useToast();
   const imageUrl = useObjectUrl(id ? `/cases/${id}/image` : undefined);
-  const heatmapUrl = useObjectUrl(id ? `/cases/${id}/heatmap` : undefined);
   const maskUrl = useObjectUrl(id ? `/cases/${id}/mask` : undefined);
 
   const [ts] = useState(Date.now());
@@ -170,17 +168,16 @@ export function Outcome() {
                 </div>
               </div>
 
-              {/* Right Side: Uncertainty Heatmap */}
+              {/* Right Side: Binary Mask Overlay */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <h4 style={{ fontSize: '0.875rem', fontWeight: 700, color: 'var(--text-muted)', borderBottom: '1px solid var(--border)', paddingBottom: 6 }}>
-                  🔥 Uncertainty Heatmap
+                  ⚫ Binary Mask Overlay
                 </h4>
                 <CaseCanvas
                   imageUrl={imageUrl}
-                  heatmapUrl={heatmapUrl}
-                  showHeatmap={showHeatmap}
-                  showMask={false}
-                  heatmapOpacity={heatmapOpacity}
+                  maskUrl={maskUrl}
+                  showMask={showMask}
+                  maskOpacity={maskOpacity}
                   enableZoom
                 />
               </div>
@@ -190,24 +187,22 @@ export function Outcome() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
                 <button
                   type="button"
-                  className={`btn btn-sm ${showHeatmap ? 'btn-primary' : 'btn-ghost'}`}
-                  onClick={() => setShowHeatmap(p => !p)}
-                  style={{ background: showHeatmap ? 'var(--primary)' : undefined, color: showHeatmap ? '#fff' : undefined }}
+                  className={`btn btn-sm ${showMask ? 'btn-primary' : 'btn-ghost'}`}
+                  onClick={() => setShowMask(p => !p)}
+                  style={{ background: showMask ? 'var(--primary)' : undefined, color: showMask ? '#fff' : undefined }}
                 >
-                  Heatmap: {showHeatmap ? 'ON' : 'OFF'}
+                  Mask: {showMask ? 'ON' : 'OFF'}
                 </button>
-                <span className="text-xs text-muted">Heatmap view controls</span>
+                <span className="text-xs text-muted">Mask view controls</span>
               </div>
               
-              {showHeatmap && (
+              {showMask && (
                 <div className="heatmap-slider-row" style={{ marginBottom: 10 }}>
-                  <label>Opacity: <strong>{Math.round(heatmapOpacity * 100)}%</strong></label>
-                  <input type="range" min={0} max={100} value={Math.round(heatmapOpacity * 100)}
-                    onChange={e => setHeatmapOpacity(Number(e.target.value) / 100)} style={{ flex: 1 }} />
+                  <label>Opacity: <strong>{Math.round(maskOpacity * 100)}%</strong></label>
+                  <input type="range" min={0} max={100} value={Math.round(maskOpacity * 100)}
+                    onChange={e => setMaskOpacity(Number(e.target.value) / 100)} style={{ flex: 1 }} />
                 </div>
               )}
-              
-              <ConfidenceLegend />
             </div>
           </div>
 

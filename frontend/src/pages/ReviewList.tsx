@@ -7,6 +7,7 @@ import { AppLayout } from '../components/Layout';
 import { SkeletonTable } from '../components/Skeleton';
 import { useToast } from '../components/ToastContext';
 import { formatKSTDate } from '../utils/time';
+import { saveBlob } from '../utils/saveFile';
 
 type SortKey = 'patient_name' | 'created_at' | 'status';
 type SortDir = 'asc' | 'desc';
@@ -50,13 +51,11 @@ export function ReviewList() {
     setDownloadingIds(prev => ({ ...prev, [caseId]: true }));
     try {
       const response = await api.get(`/cases/${caseId}/report?report_type=reviewer`, { responseType: 'blob' });
-      const url = URL.createObjectURL(response.data);
-      const anchor = document.createElement('a');
-      anchor.href = url;
-      anchor.download = `SuperNova_Report_${patientName ? patientName.replace(/\s+/g, '_') : caseId}.pdf`;
-      anchor.click();
-      URL.revokeObjectURL(url);
-      toast('success', 'Report downloaded successfully.');
+      const filename = `SuperNova_Reviewer_Report_${patientName ? patientName.replace(/\s+/g, '_') : caseId}.pdf`;
+      const success = await saveBlob(response.data, filename);
+      if (success) {
+        toast('success', 'Report downloaded successfully.');
+      }
     } catch (err: any) {
       toast('error', err.response?.data?.detail || 'Report download failed.');
     } finally {

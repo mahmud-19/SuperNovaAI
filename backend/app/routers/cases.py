@@ -767,7 +767,10 @@ def report_case(
     write_audit_log(db, "report_export", user_id=current_user.id, case_id=case.id, ip_address=request.client.host if request.client else None)
     db.commit()
     
-    filename = f"SuperNova_Report_{case.patient_name.replace(' ', '_') if case.patient_name else case.id}.pdf"
+    is_reviewer = current_user.role == UserRole.expert_reviewer or report_type == "reviewer"
+    kind = "Reviewer" if is_reviewer else "Sonologist"
+    safe_name = case.patient_name.replace(" ", "_") if case.patient_name else case.id
+    filename = f"SuperNova_{kind}_Report_{safe_name}.pdf"
     headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
     return StreamingResponse(stream, media_type="application/pdf", headers=headers)
 

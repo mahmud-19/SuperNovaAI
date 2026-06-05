@@ -1,5 +1,5 @@
 import { FormEvent, useState, useEffect } from 'react';
-import { Navigate, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 
 function SuperNovaLogo({ size = 52 }: { size?: number }) {
@@ -167,6 +167,12 @@ export function AdminLogin() {
           <button type="submit" className="btn btn-primary btn-lg" disabled={submitting} style={{ marginTop: 6, background: '#4F46E5', borderColor: '#4F46E5' }}>
             {submitting ? 'Authenticating…' : 'Sign in as Admin'}
           </button>
+
+          <div style={{ marginTop: 12, textAlign: 'center', fontSize: '0.875rem' }}>
+            <Link to="/login" style={{ color: '#4F46E5', fontWeight: 600, textDecoration: 'none' }}>
+              ← Back to user login
+            </Link>
+          </div>
         </form>
       </div>
     </div>

@@ -24,3 +24,10 @@ reportlab==4.2.5
 # --- desktop window + packaging ---
 pywebview==5.3.2
 pyinstaller==6.11.1
+
+# --- deep learning stack ---
+torch>=2.0
+torchvision>=0.15
+opencv-python-headless>=4.8
+segmentation-models-pytorch>=0.3.3,<0.4
+timm>=0.9,<1.0

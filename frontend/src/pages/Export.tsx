@@ -7,6 +7,7 @@ import { AppLayout } from '../components/Layout';
 import { Modal } from '../components/Modal';
 import { useToast } from '../components/ToastContext';
 import { formatKSTDate } from '../utils/time';
+import { saveBlob } from '../utils/saveFile';
 
 export function Export() {
   const { id } = useParams();
@@ -27,13 +28,11 @@ export function Export() {
     setDownloading(true);
     try {
       const response = await api.get(`/cases/${id}/report?report_type=reviewer`, { responseType: 'blob' });
-      const url = URL.createObjectURL(response.data);
-      const anchor = document.createElement('a');
-      anchor.href = url;
-      anchor.download = `SuperNova_Report_${caseData?.patient_name ? caseData.patient_name.replace(/\s+/g, '_') : id}.pdf`;
-      anchor.click();
-      URL.revokeObjectURL(url);
-      toast('success', 'Report downloaded successfully.');
+      const filename = `SuperNova_Reviewer_Report_${caseData?.patient_name ? caseData.patient_name.replace(/\s+/g, '_') : id}.pdf`;
+      const success = await saveBlob(response.data, filename);
+      if (success) {
+        toast('success', 'Report downloaded successfully.');
+      }
     } catch (err: any) {
       toast('error', err.response?.data?.detail || 'Report download failed.');
     } finally {

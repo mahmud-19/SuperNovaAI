@@ -64,6 +64,25 @@ except Exception as _exc:  # pragma: no cover - depends on the deployment env
 
     nn = _NNStub()
 
+# Startup logging check
+if _DL_AVAILABLE:
+    # Check if the 4 key weights exist
+    missing_weights = []
+    for name, path in [
+        ("AttentionUNet", ATTENTION_UNET_PATH),
+        ("BaseUNet", BASE_UNET_PATH),
+        ("DeepLabV3", DEEPLAB_V3_PATH),
+        ("MobileNetV3", MOBILENET_V3_PATH)
+    ]:
+        if not path.exists():
+            missing_weights.append(name)
+    if missing_weights:
+        logger.warning(f"ML: MOCK fallback (Missing weights for: {', '.join(missing_weights)})")
+    else:
+        logger.info("ML: real ensemble (4 models: AttentionUNet, BaseUNet, DeepLabV3, MobileNetV3)")
+else:
+    logger.warning(f"ML: MOCK fallback (Deep-learning stack unavailable: {_DL_IMPORT_ERROR})")
+
 
 # ========== MODEL ARCHITECTURES ==========
 # (Definitions are import-safe: nn.* is only touched at model construction time,

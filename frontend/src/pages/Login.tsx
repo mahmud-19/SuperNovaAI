@@ -1,5 +1,5 @@
 import { FormEvent, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Role, useAuth } from '../auth/AuthContext';
 
 /** Supernova AI — custom SVG logo mark */
@@ -181,6 +181,13 @@ export function Login() {
           <button type="submit" className="btn btn-primary btn-lg" disabled={submitting} style={{ marginTop: 6 }}>
             {submitting ? 'Signing in…' : 'Sign in'}
           </button>
+
+          <div style={{ marginTop: 12, textAlign: 'center', fontSize: '0.875rem' }}>
+            <span style={{ color: 'var(--text-muted)' }}>System Administrator? </span>
+            <Link to="/admin" style={{ color: 'var(--primary)', fontWeight: 600, textDecoration: 'none' }}>
+              Admin Login
+            </Link>
+          </div>
         </form>
       </div>
     </div>

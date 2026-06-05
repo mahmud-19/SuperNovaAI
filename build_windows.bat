@@ -3,8 +3,8 @@ REM ============================================================
 REM  SuperNova AI - build a STANDALONE Windows app (.exe)
 REM  No Python needed on the machine that runs the result.
 REM  Output: dist\SuperNovaAI\SuperNovaAI.exe  (ship the whole folder)
-REM  Note: the standalone .exe uses MOCK inference (small + reliable).
-REM        For REAL model output, use run_desktop.bat instead.
+REM  Note: the standalone .exe now bundles the deep learning stack
+REM        and copies model weights next to the executable.
 REM ============================================================
 setlocal
 
@@ -18,6 +18,8 @@ echo [2/5] Creating build virtual environment...
 python -m venv .venv-desktop || exit /b 1
 call .venv-desktop\Scripts\activate.bat
 python -m pip install --upgrade pip
+echo Installing PyTorch CPU...
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu || exit /b 1
 pip install -r requirements-desktop.txt || exit /b 1
 
 echo.
@@ -33,7 +35,12 @@ echo [4/5] Packaging with PyInstaller...
 pyinstaller supernova.spec --noconfirm || exit /b 1
 
 echo.
-echo [5/5] Done.
+echo [5/5] Copying model weights...
+if not exist "dist\SuperNovaAI\models\weights" mkdir "dist\SuperNovaAI\models\weights"
+xcopy "models\weights" "dist\SuperNovaAI\models\weights\" /E /I /H /Y || exit /b 1
+
+echo.
+echo Done.
 echo Your app is here:  dist\SuperNovaAI\SuperNovaAI.exe
 echo Ship the ENTIRE  dist\SuperNovaAI  folder (zip it for submission).
 echo.

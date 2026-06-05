@@ -14,6 +14,8 @@ if not exist .venv (
   python -m venv .venv || exit /b 1
   call .venv\Scripts\activate.bat
   python -m pip install --upgrade pip
+  echo Installing PyTorch CPU...
+  pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu || exit /b 1
   echo Installing backend dependencies (this can take several minutes)...
   pip install -r backend\requirements.txt || exit /b 1
   pip install pywebview==5.3.2 || exit /b 1

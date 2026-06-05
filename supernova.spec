@@ -5,12 +5,13 @@
 # Produces a one-folder app under dist/SuperNovaAI/. The .exe is
 # dist/SuperNovaAI/SuperNovaAI.exe. Ship the WHOLE SuperNovaAI folder.
 
-from PyInstaller.utils.hooks import collect_submodules, collect_data_files
+from PyInstaller.utils.hooks import collect_submodules, collect_data_files, collect_all
 
 block_cipher = None
 
 # Bundle the built React frontend so the backend can serve it.
-datas = [("frontend/dist", "frontend/dist")]
+datas = [("frontend/dist", "frontend/dist"), ("assets", "assets")]
+binaries = []
 
 # uvicorn / fastapi load some modules dynamically; declare them explicitly.
 hiddenimports = []
@@ -24,18 +25,22 @@ hiddenimports += [
     "click",
 ]
 
+# Collect DL packages: torch, cv2, segmentation_models_pytorch, timm
+for pkg in ["torch", "cv2", "segmentation_models_pytorch", "timm"]:
+    pkg_datas, pkg_binaries, pkg_hidden = collect_all(pkg)
+    datas += pkg_datas
+    binaries += pkg_binaries
+    hiddenimports += pkg_hidden
+
 a = Analysis(
     ["launcher.py"],
     pathex=["backend"],          # so `from app.main import app` resolves
-    binaries=[],
+    binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     runtime_hooks=[],
-    # Keep the standalone build small + reliable: the heavy DL stack is excluded,
-    # so packaged inference uses the graceful mock fallback. Remove these lines
-    # (and install torch before building) if you want real models in the .exe.
-    excludes=["torch", "torchvision", "cv2", "segmentation_models_pytorch", "timm"],
+    excludes=[],                 # DL libraries are bundled now
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
@@ -59,6 +64,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon="assets/supernova.ico",
 )
 
 coll = COLLECT(
