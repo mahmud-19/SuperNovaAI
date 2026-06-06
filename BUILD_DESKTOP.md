@@ -42,6 +42,8 @@ Best when you must hand mentors a **self-contained app** they can just run.
 
 4. **Zip the entire `dist\SuperNovaAI\` folder** and submit that. Mentors unzip
    and double-click `SuperNovaAI.exe`.
+   
+   *Note: If upgrading, delete the old `app.db` next to `SuperNovaAI.exe` once so the fixed seeding takes effect.*
 
 ### Important trade-off for Option B
 The standalone `.exe` is built **without** the heavy deep-learning stack

@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any, Optional
 
 from sqlalchemy.orm import Session
@@ -12,5 +13,15 @@ def write_audit_log(
     case_id: Optional[int] = None,
     ip_address: Optional[str] = None,
     details: Optional[Any] = None,
+    timestamp: Optional[datetime] = None,
 ) -> None:
-    db.add(AuditLog(user_id=user_id, action=action, case_id=case_id, ip_address=ip_address, details=details))
+    log_entry = AuditLog(
+        user_id=user_id,
+        action=action,
+        case_id=case_id,
+        ip_address=ip_address,
+        details=details,
+    )
+    if timestamp is not None:
+        log_entry.timestamp = timestamp
+    db.add(log_entry)

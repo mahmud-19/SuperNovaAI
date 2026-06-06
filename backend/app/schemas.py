@@ -1,7 +1,14 @@
-from datetime import date, datetime
-from typing import Any, Literal, Optional
+from datetime import date, datetime, timezone
+from typing import Annotated, Any, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, EmailStr
+from pydantic import BaseModel, ConfigDict, EmailStr, PlainSerializer
+
+def serialize_datetime(dt: datetime) -> str:
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.isoformat().replace("+00:00", "Z")
+
+UTCDateTime = Annotated[datetime, PlainSerializer(serialize_datetime, return_type=str)]
 
 
 Role = Literal["sonologist", "expert_reviewer", "admin"]
@@ -48,8 +55,8 @@ class CaseRead(BaseModel):
     sonologist_note: Optional[str] = None
     reviewer_note: Optional[str] = None
     submitted: bool = False
-    created_at: datetime
-    updated_at: datetime
+    created_at: UTCDateTime
+    updated_at: UTCDateTime
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -63,7 +70,7 @@ class InferenceResultRead(BaseModel):
     confidence_score: float
     total_lesions: int
     total_pixels: int
-    created_at: datetime
+    created_at: UTCDateTime
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -101,6 +108,6 @@ class AdminUserRead(BaseModel):
     username: str
     email: EmailStr
     role: str
-    created_at: datetime
+    created_at: UTCDateTime
 
     model_config = ConfigDict(from_attributes=True)

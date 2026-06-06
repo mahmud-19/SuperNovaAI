@@ -22,7 +22,7 @@ from app.auth import get_current_user, require_role
 from app.config import get_settings
 from app.database import get_db
 from app.ml.inference import InferenceOutput, run_inference
-from app.models import Annotation, AuditLog, Case, CaseStatus, InferenceResult, ResultSource, User, UserRole
+from app.models import Annotation, AuditLog, Case, CaseStatus, InferenceResult, ResultSource, User, UserRole, utc_now
 from app.schemas import AnnotateRequest, CaseDetail, CaseRead, InferenceResultRead
 from app.services.audit import write_audit_log
 from app.services.preprocess import preprocess_image, read_validated_upload
@@ -122,6 +122,7 @@ async def upload_case(
     current_user: User = Depends(require_role(UserRole.sonologist)),
     db: Session = Depends(get_db),
 ) -> Case:
+    now = utc_now()
     content, original_format = await read_validated_upload(file)
     if patient_id:
         existing = db.scalar(select(Case).where(Case.patient_id == patient_id))
@@ -146,6 +147,7 @@ async def upload_case(
         exam_date=exam_date,
         sonologist_note=sonologist_note,
         submitted=False,
+        created_at=now,
     )
     db.add(case)
     db.flush()
@@ -176,7 +178,7 @@ async def upload_case(
     case.file_format = result.file_format
     case.bit_depth = result.bit_depth
     case.contrast_adjusted = result.contrast_adjusted
-    write_audit_log(db, "upload", user_id=current_user.id, case_id=case.id, ip_address=request.client.host if request.client else None)
+    write_audit_log(db, "upload", user_id=current_user.id, case_id=case.id, ip_address=request.client.host if request.client else None, timestamp=now)
     db.commit()
     db.refresh(case)
     return case
@@ -481,9 +483,15 @@ def finalize_case(
     corr_images.mkdir(parents=True, exist_ok=True)
     corr_masks.mkdir(parents=True, exist_ok=True)
 
-    # 1. Copy preprocessed image to corrections/images/<patient_id>.png
+    # 1. Generate and save reannotated image to corrections/images/<patient_id>.png
     if case.preprocessed_image_path and Path(case.preprocessed_image_path).exists():
-        shutil.copyfile(case.preprocessed_image_path, str(corr_images / f"{case.patient_id}.png"))
+        try:
+            reann_img = _draw_contours_from_mask(case.preprocessed_image_path, str(flat_mask_path))
+            reann_img.save(str(corr_images / f"{case.patient_id}.png"), format="PNG")
+        except Exception as e:
+            import logging
+            logging.getLogger("supernova.cases").error(f"Failed to generate reannotated correction image: {e}")
+            shutil.copyfile(case.preprocessed_image_path, str(corr_images / f"{case.patient_id}.png"))
 
     # 2. Copy approved mask to corrections/masks/<patient_id>.png
     if flat_mask_path.exists():
